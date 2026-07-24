@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import os
 import re
-import json
-import time as _time
 import logging
 import threading
+import time as _time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from decimal import Decimal, InvalidOperation
 from httpx import Client
@@ -23,7 +22,7 @@ from telegram import (
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, filters, CallbackContext,
-    PicklePersistence
+    PicklePersistence, PersistenceInput
 )
 
 # ─── Config ──────────────────────────────────────────────────────────
@@ -668,7 +667,10 @@ def run_http() -> None:
 def main() -> None:
     threading.Thread(target=run_http, daemon=True).start()
 
-    persistence = PicklePersistence(filepath=DATA_FILE, store_bot_data=True)
+    persistence = PicklePersistence(
+        filepath=DATA_FILE,
+        store_data=PersistenceInput(bot_data=True, user_data=False, chat_data=False)
+    )
     app = Application.builder().token(TOKEN).persistence(persistence).build()
 
     # Init default watchlists if needed
