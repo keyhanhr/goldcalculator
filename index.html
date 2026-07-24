@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>محاسبه‌گر قیمت طلا</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #1a1a1a;
+      --card: #2c2c2c;
+      --gold: #ffd700;
+      --text: #f0f0f0;
+      --muted: #a0a0a0;
+      --border: #444;
+      --input-bg: #333;
+      --error: #e57373;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Vazirmatn', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 20px;
+    }
+
+    #root {
+      width: 100%;
+      max-width: 600px;
+    }
+
+    .app {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      border: 1px solid var(--border);
+    }
+
+    h1 {
+      color: var(--gold);
+      text-align: center;
+      font-size: 1.9rem;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 24px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 520px) {
+      .form-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+      .form-grid .field:first-child {
+        grid-column: 1 / -1;
+      }
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .field input {
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--input-bg);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 1rem;
+      direction: ltr;
+      text-align: right;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .field input::placeholder {
+      color: #666;
+    }
+
+    .field input:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.2);
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0 0 24px;
+    }
+
+    .results {
+      min-height: 100px;
+    }
+
+    .placeholder {
+      padding: 18px;
+      background: #383838;
+      border: 1px dashed var(--gold);
+      border-radius: 10px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.7;
+    }
+
+    .result-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px dashed var(--border);
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    .result-item:last-of-type {
+      border-bottom: none;
+    }
+
+    .result-label {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .result-value {
+      font-weight: 700;
+      font-size: 1.05rem;
+      direction: ltr;
+      text-align: left;
+    }
+
+    .result-item.total {
+      margin-top: 16px;
+      padding-top: 18px;
+      border-top: 2px solid var(--gold);
+      border-bottom: none;
+    }
+
+    .result-item.total .result-label {
+      color: var(--gold);
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .result-item.total .result-value {
+      color: var(--gold);
+      font-size: 1.3rem;
+    }
+
+    .result-item.breakdown {
+      padding: 10px 0;
+    }
+
+    .result-item.breakdown .result-value {
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .footer {
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .share-section {
+      text-align: left;
+      margin-top: 14px;
+    }
+
+    .share-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-family: inherit;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .share-btn:hover {
+      background: rgba(255, 215, 0, 0.1);
+      color: var(--gold);
+      border-color: var(--gold);
+    }
+
+    .error {
+      color: var(--error);
+      text-align: center;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="app">
+      <h1>💰 محاسبه‌گر قیمت طلا</h1>
+      <p class="subtitle">قیمت نهایی خرید طلا را محاسبه کنید</p>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="goldPrice">قیمت هر گرم طلای ۱۸ عیار (تومان)</label>
+          <input id="goldPrice" type="text" inputmode="numeric" placeholder="مثال: ۳٬۳۵۰٬۰۰۰" />
+        </div>
+        <div class="field">
+          <label for="weight">وزن طلا (گرم)</label>
+          <input id="weight" type="text" inputmode="decimal" placeholder="مثال: ۱۲.۳۴۵" />
+        </div>
+        <div class="field">
+          <label for="manufFee">اجرت ساخت (درصد)</label>
+          <input id="manufFee" type="text" inputmode="decimal" placeholder="مثال: ۱۵" />
+        </div>
+        <div class="field">
+          <label for="sellerProfit">سود فروشنده (درصد)</label>
+          <input id="sellerProfit" type="text" inputmode="decimal" value="7" />
+        </div>
+        <div class="field">
+          <label for="vat">مالیات بر ارزش افزوده (درصد)</label>
+          <input id="vat" type="text" inputmode="decimal" value="10" />
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="results" id="results">
+        <div class="placeholder">
+          لطفاً **قیمت هر گرم طلای ۱۸ عیار**، **وزن طلا** و **اجرت ساخت** را وارد کنید.
+        </div>
+      </div>
+
+      <div class="footer">
+        <p>* هزینه استفاده از برنامه *</p>
+        <p>اگر با این برنامه در خریدتون سود کردید، لطفا قسمتی از اون رو صرف خرید مواد پروتئینی برای خانواده های نیازمند کنید.</p>
+      </div>
+
+      <div class="share-section">
+        <button class="share-btn" onclick="shareApp()">📤 معرفی برنامه به دیگران</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ─── Format helpers ──────────────────────────────────────────────
+    function toEnglishDigits(str) {
+      const persian = ['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
+      const arabic  = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+      let s = str.replace(/,/g, '');
+      for (let i = 0; i < 10; i++) {
+        s = s.split(persian[i]).join(i);
+        s = s.split(arabic[i]).join(i);
+      }
+      return s;
+    }
+
+    function formatNumber(n) {
+      return n.toLocaleString('fa-IR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+
+    function parseNum(val) {
+      const clean = toEnglishDigits(val.trim()).replace(/,/g, '');
+      if (clean === '') return NaN;
+      return parseFloat(clean);
+    }
+
+    // ─── Calculation ────────────────────────────────────────────────
+    const INPUTS = ['goldPrice', 'weight', 'manufFee', 'sellerProfit', 'vat'];
+    const RESULTS = document.getElementById('results');
+
+    function calc() {
+      const gp  = parseNum(document.getElementById('goldPrice').value);
+      const w   = parseNum(document.getElementById('weight').value);
+      const mf  = parseNum(document.getElementById('manufFee').value);
+      const sp  = parseNum(document.getElementById('sellerProfit').value);
+      const v   = parseNum(document.getElementById('vat').value);
+
+      // Validate required fields
+      if (!gp || !w || (mf === undefined || isNaN(mf)) || isNaN(sp) || isNaN(v)) {
+        RESULTS.innerHTML = `<div class="placeholder">
+          لطفاً **قیمت هر گرم طلای ۱۸ عیار**، **وزن طلا** و **اجرت ساخت** را وارد کنید.
+        </div>`;
+        return;
+      }
+
+      if (gp <= 0 || w <= 0 || mf < 0 || sp < 0 || v < 0) {
+        RESULTS.innerHTML = `<div class="error">مقادیر وارد شده معتبر نیستند. لطفاً اعداد مثبت وارد کنید.</div>`;
+        return;
+      }
+
+      // Standard Iranian gold pricing formula:
+      // 1. Gold value = goldPrice × weight
+      // 2. + manufacturing fee % on gold value
+      // 3. + seller profit % on (gold value + manuf fee)
+      // 4. + VAT % on (gold value + manuf fee + seller profit)
+
+      const goldValue     = gp * w;
+      const manufAmount   = goldValue * (mf / 100);
+      const afterManuf    = goldValue + manufAmount;
+      const profitAmount  = afterManuf * (sp / 100);
+      const afterProfit   = afterManuf + profitAmount;
+      const vatAmount     = afterProfit * (v / 100);
+      const total         = afterProfit + vatAmount;
+
+      const perGramTotal  = total / w;
+
+      RESULTS.innerHTML = `
+        <div class="result-item">
+          <span class="result-label">💰 قیمت خالص طلا</span>
+          <span class="result-value">${formatNumber(goldValue)} تومان</span>
+        </div>
+        <div class="result-item breakdown">
+          <span class="result-label">➕ اجرت ساخت (${mf}%)</span>
+          <span class="result-value">${formatNumber(manufAmount)} تومان</span>
+        </div>
+        <div class="result-item breakdown">
+          <span class="result-label">➕ سود فروشنده (${sp}%)</span>
+          <span class="result-value">${formatNumber(profitAmount)} تومان</span>
+        </div>
+        <div class="result-item breakdown">
+          <span class="result-label">➕ مالیات بر ارزش افزوده (${v}%)</span>
+          <span class="result-value">${formatNumber(vatAmount)} تومان</span>
+        </div>
+        <div class="result-item total">
+          <span class="result-label">🟡 قیمت نهایی</span>
+          <span class="result-value">${formatNumber(total)} تومان</span>
+        </div>
+        <div class="result-item" style="border-bottom:none; padding-top:6px;">
+          <span class="result-label" style="font-size:0.85rem;color:#888;">قیمت هر گرم با احتساب هزینه‌ها</span>
+          <span class="result-value" style="font-size:1rem;font-weight:500;">${formatNumber(perGramTotal)} تومان</span>
+        </div>
+      `;
+    }
+
+    // ─── Auto-calc on input ─────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      INPUTS.forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener('input', calc);
+        el.addEventListener('focus', () => el.select());
+      });
+    });
+
+    // ─── Share ──────────────────────────────────────────────────────
+    function shareApp() {
+      const url = window.location.href;
+      if (navigator.share) {
+        navigator.share({ title: 'محاسبه‌گر قیمت طلا', url });
+      } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          alert('🔗 لینک برنامه کپی شد!');
+        });
+      } else {
+        prompt('لینک برنامه:', url);
+      }
+    }
+  </script>
+</body>
+</html>
