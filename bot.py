@@ -83,21 +83,39 @@ WATCHLIST_DEFAULTS = [
 ]
 
 WATCHLIST_LABELS = {
-    "crypto:bitcoin": ("₿ بیت‌کوین", "USD"),
-    "tala:dollar": ("💵 دلار", "تومان"),
-    "crypto:tether": ("💵 تتر (USDT)", "USD"),
-    "crypto:pax-gold": ("🪙 اونس طلا (XAU)", "USD"),
-    "crypto:ethereum": ("♦️ اتریوم", "USD"),
-    "crypto:solana": ("◎ سولانا", "USD"),
-    "crypto:ripple": ("✧ ریپل", "USD"),
-    "crypto:cardano": ("🟣 کاردانو", "USD"),
-    "crypto:dogecoin": ("🐕 دوج‌کوین", "USD"),
-    "crypto:binancecoin": ("🔶 بایننس", "USD"),
-    "tala:18k": ("🥇 طلای ۱۸ عیار", "تومان"),
-    "tala:sekke": ("🪙 سکه امامی", "تومان"),
-    "tala:sekke-nim": ("🪙 نیم سکه", "تومان"),
-    "tala:sekke-rob": ("🪙 ربع سکه", "تومان"),
-    "tala:ounce": ("🌍 اونس طلا", "$"),
+    "crypto:bitcoin": ("₿ بیت‌کوین", ""),
+    "tala:dollar": ("💵 دلار", ""),
+    "crypto:tether": ("💵 تتر (USDT)", ""),
+    "crypto:pax-gold": ("🪙 اونس طلا (XAU)", ""),
+    "crypto:ethereum": ("♦️ اتریوم", ""),
+    "crypto:solana": ("◎ سولانا", ""),
+    "crypto:ripple": ("✧ ریپل", ""),
+    "crypto:cardano": ("🟣 کاردانو", ""),
+    "crypto:dogecoin": ("🐕 دوج‌کوین", ""),
+    "crypto:binancecoin": ("🔶 بایننس", ""),
+    "tala:18k": ("🥇 طلای ۱۸ عیار", ""),
+    "tala:sekke": ("🪙 سکه امامی", ""),
+    "tala:sekke-nim": ("🪙 نیم سکه", ""),
+    "tala:sekke-rob": ("🪙 ربع سکه", ""),
+    "tala:ounce": ("🌍 اونس طلا", ""),
+}
+
+# Coin name aliases (short names, Persian names → CoinPaprika/CoinGecko ID)
+COIN_ALIASES = {
+    "btc": "bitcoin", "bitcoin": "bitcoin", "بیت‌کوین": "bitcoin", "بیت": "bitcoin",
+    "eth": "ethereum", "ethereum": "ethereum", "اتریوم": "ethereum",
+    "sol": "solana", "solana": "solana", "سولانا": "solana",
+    "xrp": "ripple", "ripple": "ripple", "ریپل": "ripple",
+    "ada": "cardano", "cardano": "cardano", "کاردانو": "cardano",
+    "doge": "dogecoin", "dogecoin": "dogecoin", "دوج": "dogecoin", "دوج‌کوین": "dogecoin",
+    "bnb": "binancecoin", "binancecoin": "binancecoin", "بایننس": "binancecoin",
+    "usdt": "tether", "tether": "tether", "تتر": "tether",
+    "xau": "pax-gold", "gold": "pax-gold", "طلا": "tala:18k",
+    "btc-bitcoin": "bitcoin", "usdt-tether": "tether",  # CoinPaprika IDs
+    "paxg-pax-gold": "pax-gold", "eth-ethereum": "ethereum",
+    "sol-solana": "solana", "xrp-xrp": "ripple",
+    "ada-cardano": "cardano", "doge-dogecoin": "dogecoin",
+    "bnb-binance-coin": "binancecoin",
 }
 
 def cg_id(item: str) -> str:
@@ -151,9 +169,9 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                             if item == "tala:ounce":
                                 # Gold ounce in USD, no decimals
                                 p_int = int(round(price_f))
-                                result[item] = f"{fmt(Decimal(str(p_int)))} دلار"
+                                result[item] = f"{fmt(Decimal(str(p_int)))}"
                             elif price_f >= 1000:
-                                result[item] = f"{fmt(Decimal(str(int(price_f))))} ت"
+                                result[item] = f"{fmt(Decimal(str(int(price_f))))}"
                             else:
                                 result[item] = f"{price_f:,.2f} $"
                         except ValueError:
@@ -177,7 +195,7 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                 if m:
                     price_rial = int(m.group(1).replace(",", ""))
                     price_toman = price_rial // 10
-                    result["tala:dollar"] = f"{fmt(Decimal(str(price_toman)))} ت"
+                    result["tala:dollar"] = f"{fmt(Decimal(str(price_toman)))}"
                 else:
                     result["tala:dollar"] = "—"
         except Exception as e:
@@ -215,10 +233,10 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                             p_int = int(round(price_f))
                             formatted = fmt(Decimal(str(p_int)))
                         elif price_f >= 0.01:
-                            formatted = f"{price_f:.4f} $"
+                            formatted = f"{price_f:.4f}"
                         else:
-                            formatted = f"{price_f:.6f} $"
-                        result[item] = f"{formatted} دلار"
+                            formatted = f"{price_f:.6f}"
+                        result[item] = formatted
                     else:
                         result[item] = "—"
             except Exception as e:
@@ -449,53 +467,91 @@ async def add_coin_handler(update: Update, context: CallbackContext) -> None:
     if not context.user_data.get("awaiting_coin"):
         return
 
-    coin_name = update.message.text.strip().lower().replace(" ", "-")
+    raw = update.message.text.strip().lower().replace(" ", "-")
     context.user_data["awaiting_coin"] = False
 
-    # Verify the coin exists on CoinGecko
-    try:
-        with Client(verify=False, timeout=8) as c:
-            r = c.get(
-                f"https://api.coingecko.com/api/v3/simple/price?ids={coin_name}&vs_currencies=usd",
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            data = r.json()
-            if coin_name not in data:
-                await update.message.reply_text(
-                    f"❌ کوین `{coin_name}` پیدا نشد!\n\n"
-                    "اسم درست رو از اینجا پیدا کن:\n"
-                    "https://www.coingecko.com/",
-                    parse_mode="Markdown"
+    # Resolve alias
+    coin_id = COIN_ALIASES.get(raw)
+    if not coin_id:
+        # Try CoinPaprika to verify unknown coins
+        try:
+            with Client(verify=False, timeout=8) as c:
+                r = c.get(
+                    f"https://api.coinpaprika.com/v1/tickers/{raw}",
+                    headers={"User-Agent": "Mozilla/5.0"}
                 )
-                return
-    except Exception:
-        await update.message.reply_text(
-            "❌ خطا در ارتباط با CoinGecko. بعداً تلاش کن."
-        )
-        return
+                if r.status_code == 200:
+                    coin_id = raw
+                else:
+                    await update.message.reply_text(
+                        f"❌ کوین `{raw}` پیدا نشد!\n\n"
+                        "اسم‌های معتبر:\n"
+                        "`btc`, `eth`, `sol`, `xrp`, `doge`\n"
+                        "`بیت‌کوین`, `اتریوم`, `سولانا`",
+                        parse_mode="Markdown"
+                    )
+                    return
+        except Exception:
+            await update.message.reply_text("❌ خطا در ارتباط با سرور.")
+            return
 
     uid = str(update.effective_user.id)
     watchlists = context.bot_data.setdefault("watchlists", {})
     user_wl = watchlists.get(uid, DEFAULT_COINS.copy())
 
-    item_key = f"crypto:{coin_name}"
+    item_key = f"crypto:{coin_id}"
     if item_key in user_wl:
+        display = WATCHLIST_LABELS.get(item_key, (coin_id, ""))[0]
         await update.message.reply_text(
-            f"✅ `{coin_name}` از قبل تو واچ‌لیستت هست!",
+            f"✅ `{display}` از قبل تو واچ‌لیستت هست!",
             parse_mode="Markdown"
         )
         return
 
     user_wl.append(item_key)
     watchlists[uid] = user_wl
-
-    # Clear cache so next fetch gets new data
     PRICE_CACHE["time"] = 0
 
+    display = WATCHLIST_LABELS.get(item_key, (coin_id, ""))[0]
     await update.message.reply_text(
-        f"✅ `{coin_name}` به واچ‌لیست اضافه شد!\n"
-        "از /watchlist برای دیدنش استفاده کن.",
-        parse_mode="Markdown"
+        f"✅ {display} به واچ‌لیست اضافه شد!\n"
+        "از /watchlist برای دیدنش استفاده کن."
+    )
+
+
+async def delcoin_handler(update: Update, context: CallbackContext) -> None:
+    """Remove a coin from the watchlist."""
+    raw = " ".join(context.args).strip().lower().replace(" ", "-") if context.args else ""
+    if not raw:
+        await update.message.reply_text(
+            "❗ اسم کوین رو بفرست:\n"
+            "مثال: `/delcoin sol` یا `/delcoin سولانا`",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Resolve alias
+    coin_id = COIN_ALIASES.get(raw, raw)
+    item_key = f"crypto:{coin_id}"
+
+    uid = str(update.effective_user.id)
+    watchlists = context.bot_data.setdefault("watchlists", {})
+    user_wl = watchlists.get(uid, DEFAULT_COINS.copy())
+
+    if item_key not in user_wl:
+        await update.message.reply_text(
+            f"❌ این کوین تو واچ‌لیستت نیست!"
+        )
+        return
+
+    user_wl.remove(item_key)
+    watchlists[uid] = user_wl
+    PRICE_CACHE["time"] = 0
+
+    display = WATCHLIST_LABELS.get(item_key, (coin_id, ""))[0]
+    await update.message.reply_text(
+        f"🗑 {display} از واچ‌لیست حذف شد!\n"
+        "از /watchlist برای دیدنش استفاده کن."
     )
 
 # ══════════════════════════════════════════════════════════════════════
@@ -679,10 +735,12 @@ async def help_cmd(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(
         "🤖 *راهنما*\n\n"
         "📊 **محاسبه طلا** — قیمت نهایی طلا با اجرت و مالیات\n"
-        "📋 **واچ‌لیست** — قیمت لحظه‌ای ارزها و طلا\n"
-        "➕ /addcoin <نام> — اضافه کردن کوین به واچ‌لیست\n"
-        "🗑 /delcoin <نام> — حذف کوین از واچ‌لیست\n\n"
-        "💡 مثال: `/addcoin ethereum`",
+        "📋 **واچ‌لیست** — قیمت لحظه‌ای ارزها و طلا\n\n"
+        "➕ **اضافه کردن:** `/addcoin sol` یا `سولانا`\n"
+        "🗑 **حذف:** `/delcoin eth` یا `/delcoin اتریوم`\n\n"
+        "💡 اسم‌های معتبر:\n"
+        "`btc`, `eth`, `sol`, `xrp`, `doge`, `bnb`\n"
+        "`بیت‌کوین`, `اتریوم`, `سولانا`, `ریپل`",
         parse_mode="Markdown"
     )
 
@@ -777,6 +835,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("watchlist", watchlist_cmd))
     app.add_handler(CommandHandler("addcoin", add_coin_handler))
+    app.add_handler(CommandHandler("delcoin", delcoin_handler))
     app.add_handler(CallbackQueryHandler(watchlist_cb, pattern=r"^wl_(refresh|add|del)$"))
     app.add_handler(CallbackQueryHandler(watchlist_del_cb, pattern=r"^wl_del:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback))
