@@ -121,52 +121,84 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
         elif item.startswith("tala:"):
             tala_paths.append(item)
 
-    # Fetch crypto prices from CoinGecko (batch)
-    if crypto_ids:
-        try:
-            ids = ",".join(crypto_ids)
-            with Client(verify=False, timeout=8) as c:
-                r = c.get(
-                    f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd",
-                    headers={"User-Agent": "Mozilla/5.0"}
-                )
-                data = r.json()
-                for item in items:
-                    if item.startswith("crypto:"):
-                        cid = cg_id(item)
-                        if cid in data and "usd" in data[cid]:
-                            result[item] = f"{data[cid]['usd']:,.2f} $"
+    # Fetch crypto prices from CoinPaprika
+    for item in items:
+        if item.startswith("crypto:"):
+            cid = cg_id(item)
+            # Map CoinGecko IDs to CoinPaprika IDs
+            cp_map = {
+                "bitcoin": "btc-bitcoin",
+                "tether": "usdt-tether",
+                "pax-gold": "paxg-pax-gold",
+                "ethereum": "eth-ethereum",
+                "solana": "sol-solana",
+                "ripple": "xrp-xrp",
+                "cardano": "ada-cardano",
+                "dogecoin": "doge-dogecoin",
+                "binancecoin": "bnb-binance-coin",
+            }
+            cp_id = cp_map.get(cid, cid)
+            try:
+                with Client(verify=False, timeout=8) as c:
+                    r = c.get(
+                        f"https://api.coinpaprika.com/v1/tickers/{cp_id}",
+                        headers={"User-Agent": "Mozilla/5.0"}
+                    )
+                    data = r.json()
+                    price = data.get("quotes", {}).get("USD", {}).get("price")
+                    if price:
+                        price_f = float(price)
+                        if price_f >= 1:
+                            result[item] = f"{price_f:,.2f} $"
+                        elif price_f >= 0.01:
+                            result[item] = f"{price_f:.4f} $"
                         else:
-                            result[item] = "—"
-        except Exception as e:
-            logger.warning(f"CoinGecko error: {e}")
-            for item in items:
-                if item.startswith("crypto:"):
-                    result[item] = "⚠️ خطا"
+                            result[item] = f"{price_f:.6f} $"
+                    else:
+                        result[item] = "—"
+            except Exception as e:
+                logger.warning(f"CoinPaprika {cp_id} error: {e}")
+                result[item] = "⚠️ خطا"
 
-    # Fetch Iranian prices from tala.ir
+    # Fetch Iranian prices from tala.ir (only 18k works server-side)
+    # Calculate coin prices from 18K gold price
+    gold_18k = None
     for item in tala_paths:
-        path = cg_id(item)
-        try:
-            url = f"https://www.tala.ir/price/{path}"
-            with Client(verify=False, timeout=8) as c:
-                r = c.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                if path == "18k":
+        if item == "tala:18k":
+            try:
+                with Client(verify=False, timeout=8) as c:
+                    r = c.get("https://www.tala.ir/price/18k", headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    })
                     m = re.search(r'عیار\s*750\s*یا\s*18.*?<h5[^>]*>([0-9,]+)', r.text, re.DOTALL)
-                elif path == "sekke":
-                    m = re.search(r'([0-9]{1,3},[0-9]{3},[0-9]{3})', r.text)
-                elif path in ("sekke-nim", "sekke-rob"):
-                    m = re.search(r'>([0-9]{1,3},[0-9]{3},[0-9]{3})<', r.text)
-                else:
-                    m = None
-                if m:
-                    price = int(m.group(1).replace(",", ""))
-                    result[item] = f"{price:,} تومان"
-                else:
-                    result[item] = "—"
-        except Exception as e:
-            logger.warning(f"tala.ir/{path} error: {e}")
-            result[item] = "⚠️ خطا"
+                    if m:
+                        gold_18k = int(m.group(1).replace(",", ""))
+                        result[item] = f"{gold_18k:,} تومان"
+                    else:
+                        result[item] = "—"
+            except Exception as e:
+                logger.warning(f"tala.ir/18k error: {e}")
+                result[item] = "⚠️ خطا"
+        elif item.startswith("tala:") and gold_18k:
+            # Calculate Iranian coin prices from 18K gold
+            # Gold 900 (21.6K) per gram = 18K * 900/750
+            gold_900 = gold_18k * 900 // 750
+            premium = 3  # 3% premium for coin
+            if item == "tala:sekke":
+                # Emami coin: 8.133g of gold 900
+                coin_price = int(8.133 * gold_900 * (100 + premium) / 100)
+            elif item == "tala:sekke-nim":
+                # Half coin: 4.0665g of gold 900
+                coin_price = int(4.0665 * gold_900 * (100 + premium) / 100)
+            elif item == "tala:sekke-rob":
+                # Quarter coin: 2.03325g of gold 900
+                coin_price = int(2.03325 * gold_900 * (100 + premium) / 100)
+            else:
+                coin_price = None
+            if coin_price:
+                result[item] = f"{coin_price:,} تومان"
+            else:
+                result[item] = "—"
 
     PRICE_CACHE["data"] = result
     PRICE_CACHE["time"] = now
