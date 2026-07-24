@@ -174,8 +174,9 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                 })
                 m = re.search(r'class=.price.[^>]*>([0-9,]+)', r.text)
                 if m:
-                    price = int(m.group(1).replace(",", ""))
-                    result["tala:dollar"] = f"{fmt(Decimal(str(price)))} تومان"
+                    price_rial = int(m.group(1).replace(",", ""))
+                    price_toman = price_rial // 10
+                    result["tala:dollar"] = f"{fmt(Decimal(str(price_toman)))} تومان"
                 else:
                     result["tala:dollar"] = "—"
         except Exception as e:
