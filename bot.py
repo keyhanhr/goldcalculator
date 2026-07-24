@@ -84,6 +84,7 @@ WATCHLIST_DEFAULTS = [
 
 WATCHLIST_LABELS = {
     "crypto:bitcoin": ("₿ بیت‌کوین", "USD"),
+    "tala:dollar": ("💵 دلار", "تومان"),
     "crypto:tether": ("💵 تتر (USDT)", "USD"),
     "crypto:pax-gold": ("🪙 اونس طلا (XAU)", "USD"),
     "crypto:ethereum": ("♦️ اتریوم", "USD"),
@@ -147,7 +148,10 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                         price_clean = price.replace(",", "")
                         try:
                             price_f = float(price_clean)
-                            if price_f >= 1000:
+                            if item == "tala:ounce":
+                                # Gold ounce is in USD
+                                result[item] = f"{price_f:,.2f} $"
+                            elif price_f >= 1000:
                                 result[item] = f"{int(price_f):,} تومان"
                             else:
                                 result[item] = f"{price_f:,.2f} $"
@@ -158,8 +162,25 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
     except Exception as e:
         logger.warning(f"tala.ir API error: {e}")
         for item in items:
-            if item.startswith("tala:"):
+            if item.startswith("tala:") and item != "tala:dollar":
                 result[item] = "⚠️ خطا"
+
+    # Fetch dollar price from tgju.org
+    if "tala:dollar" in items:
+        try:
+            with Client(verify=False, timeout=8) as c:
+                r = c.get("https://www.tgju.org/profile/price_dollar_rl", headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                m = re.search(r'class=.price.[^>]*>([0-9,]+)', r.text)
+                if m:
+                    price = int(m.group(1).replace(",", ""))
+                    result["tala:dollar"] = f"{price:,} تومان"
+                else:
+                    result["tala:dollar"] = "—"
+        except Exception as e:
+            logger.warning(f"tgju dollar error: {e}")
+            result["tala:dollar"] = "⚠️ خطا"
 
     # Fetch crypto prices from CoinPaprika
     for item in items:
@@ -302,7 +323,7 @@ def main_kb() -> ReplyKeyboardMarkup:
 
 # ─── Watchlist ───────────────────────────────────────────────────────
 DEFAULT_COINS = [
-    "crypto:bitcoin", "tala:18k", "crypto:tether",
+    "crypto:bitcoin", "tala:18k", "tala:dollar",
     "tala:ounce", "tala:sekke", "tala:sekke-nim", "tala:sekke-rob",
 ]
 
