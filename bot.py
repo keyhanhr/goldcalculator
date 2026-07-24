@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 🤖 Gold Price Calculator Bot — Telegram Bot
-محاسبه‌گر قیمت طلا در تلگرام
+محاسبه‌گر قیمت طلا با دکمه‌های预设
 """
 
 from __future__ import annotations
@@ -10,20 +10,18 @@ import os
 import re
 import logging
 from decimal import Decimal, InvalidOperation
-from typing import Optional
 
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     ReplyKeyboardMarkup, KeyboardButton
 )
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, filters, CallbackContext
 )
 
 # ─── Config ──────────────────────────────────────────────────────────
 TOKEN = os.environ.get("BOT_TOKEN", "8738042848:AAHplME4R3zlV2J9fpgVYI3qAY1iAeVKswE")
-BOT_USERNAME = "gold_calculator_bot"  # change if needed
 
 # ─── Logging ─────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -35,119 +33,449 @@ logger = logging.getLogger(__name__)
 # ─── Conversation States ─────────────────────────────────────────────
 (GOLD_PRICE, WEIGHT, MANUF_FEE, SELLER_PROFIT, VAT) = range(5)
 
-# ─── Helpers ─────────────────────────────────────────────────────────
+# ─── Persian digit helpers ───────────────────────────────────────────
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+PERSIAN_MAP = {"0":"۰","1":"۱","2":"۲","3":"۳","4":"۴","5":"۵","6":"۶","7":"۷","8":"۸","9":"۹"}
 
 def clean_number(text: str) -> str:
-    """Convert Persian/Arabic digits to English, remove commas."""
     text = text.translate(PERSIAN_DIGITS)
-    text = text.replace(",", "").replace("٬", "").strip()
-    return text
+    return text.replace(",", "").replace("٬", "").strip()
 
 def parse_decimal(text: str) -> Decimal | None:
     try:
         val = Decimal(clean_number(text))
-        if val < 0:
-            return None
-        return val
+        return val if val >= 0 else None
     except (InvalidOperation, ValueError):
         return None
 
 def fmt(n: Decimal) -> str:
-    """Format number with Persian thousands separator."""
-    # Separate integer and decimal parts
+    """Format number with Persian digits and thousands separator."""
     s = str(n.quantize(Decimal("1")) if n == n.to_integral() else n.normalize())
-    if "." in s:
-        int_part, dec_part = s.split(".")
-    else:
-        int_part, dec_part = s, ""
-
+    int_part, _, dec_part = s.partition(".")
     # Add commas
     result = []
     for i, ch in enumerate(reversed(int_part)):
-        if i > 0 and i % 3 == 0:
+        if i and i % 3 == 0:
             result.append("٬")
         result.append(ch)
     int_part = "".join(reversed(result))
-
-    # Convert to Persian digits
-    persian_digits = {"0":"۰","1":"۱","2":"۲","3":"۳","4":"۴","5":"۵","6":"۶","7":"۷","8":"۸","9":"۹"}
-    for eng, per in persian_digits.items():
-        int_part = int_part.replace(eng, per)
-
+    for e, p in PERSIAN_MAP.items():
+        int_part = int_part.replace(e, p)
     if dec_part:
-        for eng, per in persian_digits.items():
-            dec_part = dec_part.replace(eng, per)
+        for e, p in PERSIAN_MAP.items():
+            dec_part = dec_part.replace(e, p)
         return f"{int_part}/{dec_part}"
     return int_part
 
-def calc_gold(gold_price: Decimal, weight: Decimal, manuf_pct: Decimal,
-              profit_pct: Decimal, vat_pct: Decimal) -> dict:
-    """Standard Iranian gold pricing formula."""
-    gold_value    = gold_price * weight
-    manuf_amount  = gold_value * manuf_pct / Decimal("100")
-    after_manuf   = gold_value + manuf_amount
-    profit_amount = after_manuf * profit_pct / Decimal("100")
-    after_profit  = after_manuf + profit_amount
-    vat_amount    = after_profit * vat_pct / Decimal("100")
-    total         = after_profit + vat_amount
-    per_gram      = total / weight if weight > 0 else Decimal("0")
-
+# ─── Calculator ──────────────────────────────────────────────────────
+def calc_gold(gp: Decimal, w: Decimal, mf: Decimal, sp: Decimal, vat: Decimal) -> dict:
+    gold_val   = gp * w
+    manuf_amt  = gold_val * mf / Decimal("100")
+    profit_amt = (gold_val + manuf_amt) * sp / Decimal("100")
+    vat_amt    = (gold_val + manuf_amt + profit_amt) * vat / Decimal("100")
+    total      = gold_val + manuf_amt + profit_amt + vat_amt
     return {
-        "gold_value": gold_value,
-        "manuf_amount": manuf_amount,
-        "profit_amount": profit_amount,
-        "vat_amount": vat_amount,
-        "total": total,
-        "per_gram": per_gram,
-        "manuf_pct": manuf_pct,
-        "profit_pct": profit_pct,
-        "vat_pct": vat_pct,
+        "gold_val": gold_val, "manuf_amt": manuf_amt,
+        "profit_amt": profit_amt, "vat_amt": vat_amt,
+        "total": total, "per_gram": total / w if w else Decimal("0"),
+        "mf_pct": mf, "sp_pct": sp, "vat_pct": vat,
     }
 
-def build_result_text(r: dict) -> str:
-    """Build the formatted result message."""
+def build_result(r: dict) -> str:
     return (
+        "━━━━━━━━━━━━━━━━━━\n"
         "💰 *محاسبه‌گر قیمت طلا*\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        f"💰 قیمت خالص طلا:\n`{fmt(r['gold_value'])}` تومان\n\n"
-        f"➕ اجرت ساخت ({fmt(r['manuf_pct'])}%):\n`{fmt(r['manuf_amount'])}` تومان\n\n"
-        f"➕ سود فروشنده ({fmt(r['profit_pct'])}%):\n`{fmt(r['profit_amount'])}` تومان\n\n"
-        f"➕ مالیات بر ارزش افزوده ({fmt(r['vat_pct'])}%):\n`{fmt(r['vat_amount'])}` تومان\n\n"
+        f"📌 قیمت خالص طلا:\n`{fmt(r['gold_val'])}` تومان\n\n"
+        f"🔧 اجرت ساخت ({fmt(r['mf_pct'])}%):\n`{fmt(r['manuf_amt'])}` تومان\n\n"
+        f"📈 سود فروشنده ({fmt(r['sp_pct'])}%):\n`{fmt(r['profit_amt'])}` تومان\n\n"
+        f"🧾 مالیات بر ارزش افزوده ({fmt(r['vat_pct'])}%):\n`{fmt(r['vat_amt'])}` تومان\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"🟡 *قیمت نهایی:*\n`{fmt(r['total'])}` تومان\n\n"
-        f"📊 قیمت هر گرم با احتساب هزینه‌ها:\n`{fmt(r['per_gram'])}` تومان"
+        f"📊 میانگین هر گرم:\n`{fmt(r['per_gram'])}` تومان"
     )
 
-# ─── Keyboard ────────────────────────────────────────────────────────
-def get_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = [
-        [KeyboardButton("📊 محاسبه جدید"), KeyboardButton("❓ راهنما")],
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+# ─── Inline Keyboards ────────────────────────────────────────────────
+def btn(text: str, data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text, callback_data=data)
 
-# ─── Handlers ────────────────────────────────────────────────────────
+def price_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("۳٬۰۰۰٬۰۰۰", "gp:3000000"), btn("۳٬۳۵۰٬۰۰۰", "gp:3350000")],
+        [btn("۳٬۵۰۰٬۰۰۰", "gp:3500000"), btn("۳٬۷۵۰٬۰۰۰", "gp:3750000")],
+        [btn("۴٬۰۰۰٬۰۰۰", "gp:4000000"), btn("۴٬۵۰۰٬۰۰۰", "gp:4500000")],
+        [btn("✏️ خودم می‌نویسم", "gp:custom")],
+    ])
+
+def weight_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("۱ گرم", "w:1"), btn("۲ گرم", "w:2"), btn("۵ گرم", "w:5")],
+        [btn("۱۰ گرم", "w:10"), btn("۱۵ گرم", "w:15"), btn("۲۰ گرم", "w:20")],
+        [btn("✏️ خودم می‌نویسم", "w:custom")],
+    ])
+
+def manuf_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("۰٪ (بدون اجرت)", "mf:0"), btn("۵٪", "mf:5"), btn("۱۰٪", "mf:10")],
+        [btn("۱۵٪", "mf:15"), btn("۲۰٪", "mf:20"), btn("۲۵٪", "mf:25")],
+        [btn("✏️ خودم می‌نویسم", "mf:custom")],
+    ])
+
+def profit_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("۵٪", "sp:5"), btn("۷٪", "sp:7"), btn("۱۰٪", "sp:10")],
+        [btn("۱۵٪", "sp:15"), btn("✏️ خودم می‌نویسم", "sp:custom")],
+    ])
+
+def vat_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("۹٪", "vat:9"), btn("۱۰٪", "vat:10"), btn("✏️ خودم می‌نویسم", "vat:custom")],
+    ])
+
+def main_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("📊 محاسبه جدید"), KeyboardButton("❓ راهنما")]],
+        resize_keyboard=True
+    )
+
+# ─── Shared button rows for the result ───────────────────────────────
+def result_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("🔄 محاسبه جدید", "new_calc")],
+    ])
+
+# ─── Handler: store & advance ────────────────────────────────────────
+def store_and_advance(context: CallbackContext, key: str, val: Decimal) -> str:
+    context.user_data[key] = val
+    return "✅"  # signal success
+
+# ─── Entry ───────────────────────────────────────────────────────────
 async def start(update: Update, context: CallbackContext) -> int:
     user = update.effective_user
     await update.message.reply_text(
         f"سلام {user.first_name} 👋\n\n"
-        "به *محاسبه‌گر قیمت طلا* خوش اومدی 🪙\n\n"
-        "من بهت کمک می‌کنم قیمت نهایی طلا رو با احتساب اجرت ساخت، سود فروشنده و مالیات محاسبه کنی.\n\n"
-        "برای شروع، دکمه *محاسبه جدید* رو بزن یا قیمت هر گرم طلای ۱۸ عیار رو بفرست.",
-        reply_markup=get_keyboard(),
+        "🪙 به *محاسبه‌گر قیمت طلا* خوش اومدی!\n\n"
+        "قیمت نهایی خرید طلا رو با احتساب **اجرت ساخت**، **سود فروشنده** و **مالیات** محاسبه کن.\n\n"
+        "👇 از دکمه‌های زیر استفاده کن یا مقدار رو دستی وارد کن:",
+        reply_markup=main_kb(),
+        parse_mode="Markdown"
+    )
+    return await ask_price(update, context)
+
+async def ask_price(update: Update, context: CallbackContext) -> int:
+    msg = update.message or update.callback_query.message
+    await msg.reply_text(
+        "💰 *قیمت هر گرم طلای ۱۸ عیار* رو وارد کن:\n\n"
+        "مثال: `۳٬۳۵۰٬۰۰۰` یا `3350000`",
+        reply_markup=price_kb(),
         parse_mode="Markdown"
     )
     return GOLD_PRICE
 
-async def help_command(update: Update, context: CallbackContext) -> None:
+# ─── Gold Price ──────────────────────────────────────────────────────
+async def gold_price_handler(update: Update, context: CallbackContext) -> int:
+    text = update.message.text
+    if text == "📊 محاسبه جدید":
+        return await reset_all(update, context)
+    if text == "❓ راهنما":
+        await help_cmd(update, context)
+        return GOLD_PRICE
+
+    val = parse_decimal(text)
+    if val is None or val <= 0:
+        await update.message.reply_text(
+            "⚠️ لطفاً یه عدد معتبر وارد کن.\nمثال: `۳٬۳۵۰٬۰۰۰`",
+            reply_markup=price_kb(),
+            parse_mode="Markdown"
+        )
+        return GOLD_PRICE
+
+    context.user_data["gold_price"] = val
+    return await ask_weight(update, context)
+
+async def gold_price_cb(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "gp:custom":
+        await query.edit_message_text(
+            "💰 لطفاً *قیمت هر گرم* رو به صورت دستی تایپ کن:\n\n"
+            "مثال: `۳٬۳۵۰٬۰۰۰` یا `3350000`",
+            reply_markup=None,
+            parse_mode="Markdown"
+        )
+        return GOLD_PRICE
+
+    val = Decimal(data.split(":")[1])
+    context.user_data["gold_price"] = val
+    await query.edit_message_text(
+        f"✅ قیمت: `{fmt(val)}` تومان",
+        parse_mode="Markdown"
+    )
+    return await ask_weight(update, context)
+
+async def ask_weight(update: Update, context: CallbackContext) -> int:
+    msg = update.message or update.callback_query.message
+    await msg.reply_text(
+        "⚖️ حالا *وزن طلا* رو به گرم وارد کن:\n\n"
+        "مثال: `۱۲.۳۴۵` یا `12.345`",
+        reply_markup=weight_kb(),
+        parse_mode="Markdown"
+    )
+    return WEIGHT
+
+# ─── Weight ──────────────────────────────────────────────────────────
+async def weight_handler(update: Update, context: CallbackContext) -> int:
+    text = update.message.text
+    if text == "📊 محاسبه جدید":
+        return await reset_all(update, context)
+    if text == "❓ راهنما":
+        await help_cmd(update, context)
+        return WEIGHT
+
+    val = parse_decimal(text)
+    if val is None or val <= 0:
+        await update.message.reply_text(
+            "⚠️ لطفاً وزن معتبر وارد کن.\nمثال: `۱۲.۳۴۵` یا `12.345`",
+            reply_markup=weight_kb(),
+            parse_mode="Markdown"
+        )
+        return WEIGHT
+
+    context.user_data["weight"] = val
+    return await ask_manuf(update, context)
+
+async def weight_cb(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "w:custom":
+        await query.edit_message_text(
+            "⚖️ لطفاً *وزن* رو به صورت دستی تایپ کن:\n\n"
+            "مثال: `۱۲.۳۴۵` یا `12.345`",
+            reply_markup=None,
+            parse_mode="Markdown"
+        )
+        return WEIGHT
+    val = Decimal(data.split(":")[1])
+    context.user_data["weight"] = val
+    await query.edit_message_text(
+        f"✅ وزن: `{fmt(val)}` گرم",
+        parse_mode="Markdown"
+    )
+    return await ask_manuf(update, context)
+
+async def ask_manuf(update: Update, context: CallbackContext) -> int:
+    msg = update.message or update.callback_query.message
+    await msg.reply_text(
+        "🔧 *درصد اجرت ساخت* رو وارد کن:\n\n"
+        "اگه اجرت نداره، ۰ رو انتخاب کن.",
+        reply_markup=manuf_kb(),
+        parse_mode="Markdown"
+    )
+    return MANUF_FEE
+
+# ─── Manufacturing Fee ───────────────────────────────────────────────
+async def manuf_handler(update: Update, context: CallbackContext) -> int:
+    text = update.message.text
+    if text == "📊 محاسبه جدید":
+        return await reset_all(update, context)
+    if text == "❓ راهنما":
+        await help_cmd(update, context)
+        return MANUF_FEE
+
+    val = parse_decimal(text)
+    if val is None:
+        await update.message.reply_text(
+            "⚠️ لطفاً یه درصد معتبر وارد کن.\nمثال: `۱۵` یا `0`",
+            reply_markup=manuf_kb(),
+            parse_mode="Markdown"
+        )
+        return MANUF_FEE
+
+    context.user_data["manuf_fee"] = val
+    return await ask_profit(update, context)
+
+async def manuf_cb(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "mf:custom":
+        await query.edit_message_text(
+            "🔧 لطفاً *درصد اجرت ساخت* رو تایپ کن:\n\n"
+            "مثال: `۱۵` یا `0`",
+            reply_markup=None,
+            parse_mode="Markdown"
+        )
+        return MANUF_FEE
+    val = Decimal(data.split(":")[1])
+    context.user_data["manuf_fee"] = val
+    await query.edit_message_text(
+        f"✅ اجرت ساخت: `{fmt(val)}`٪",
+        parse_mode="Markdown"
+    )
+    return await ask_profit(update, context)
+
+async def ask_profit(update: Update, context: CallbackContext) -> int:
+    msg = update.message or update.callback_query.message
+    await msg.reply_text(
+        "📈 *درصد سود فروشنده* رو وارد کن:\n\n"
+        "پیشنهاد: ۷٪",
+        reply_markup=profit_kb(),
+        parse_mode="Markdown"
+    )
+    return SELLER_PROFIT
+
+# ─── Seller Profit ───────────────────────────────────────────────────
+async def profit_handler(update: Update, context: CallbackContext) -> int:
+    text = update.message.text
+    if text == "📊 محاسبه جدید":
+        return await reset_all(update, context)
+    if text == "❓ راهنما":
+        await help_cmd(update, context)
+        return SELLER_PROFIT
+
+    val = parse_decimal(text)
+    if val is None:
+        await update.message.reply_text(
+            "⚠️ لطفاً یه درصد معتبر وارد کن.\nمثال: `۷`",
+            reply_markup=profit_kb(),
+            parse_mode="Markdown"
+        )
+        return SELLER_PROFIT
+
+    context.user_data["seller_profit"] = val
+    return await ask_vat(update, context)
+
+async def profit_cb(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "sp:custom":
+        await query.edit_message_text(
+            "📈 لطفاً *درصد سود فروشنده* رو تایپ کن:\n\n"
+            "مثال: `۷`",
+            reply_markup=None,
+            parse_mode="Markdown"
+        )
+        return SELLER_PROFIT
+    val = Decimal(data.split(":")[1])
+    context.user_data["seller_profit"] = val
+    await query.edit_message_text(
+        f"✅ سود فروشنده: `{fmt(val)}`٪",
+        parse_mode="Markdown"
+    )
+    return await ask_vat(update, context)
+
+async def ask_vat(update: Update, context: CallbackContext) -> int:
+    msg = update.message or update.callback_query.message
+    await msg.reply_text(
+        "🧾 *درصد مالیات بر ارزش افزوده* رو وارد کن:\n\n"
+        "پیشنهاد: ۱۰٪",
+        reply_markup=vat_kb(),
+        parse_mode="Markdown"
+    )
+    return VAT
+
+# ─── VAT ─────────────────────────────────────────────────────────────
+async def vat_handler(update: Update, context: CallbackContext) -> int:
+    text = update.message.text
+    if text == "📊 محاسبه جدید":
+        return await reset_all(update, context)
+    if text == "❓ راهنما":
+        await help_cmd(update, context)
+        return VAT
+
+    val = parse_decimal(text)
+    if val is None:
+        await update.message.reply_text(
+            "⚠️ لطفاً یه درصد معتبر وارد کن.\nمثال: `۱۰`",
+            reply_markup=vat_kb(),
+            parse_mode="Markdown"
+        )
+        return VAT
+
+    context.user_data["vat"] = val
+    return await show_result(update, context)
+
+async def vat_cb(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "vat:custom":
+        await query.edit_message_text(
+            "🧾 لطفاً *درصد مالیات* رو تایپ کن:\n\n"
+            "مثال: `۱۰`",
+            reply_markup=None,
+            parse_mode="Markdown"
+        )
+        return VAT
+    val = Decimal(data.split(":")[1])
+    context.user_data["vat"] = val
+    await query.edit_message_text(
+        f"✅ مالیات: `{fmt(val)}`٪",
+        parse_mode="Markdown"
+    )
+    return await show_result(update, context)
+
+# ─── Show Result ─────────────────────────────────────────────────────
+async def show_result(update: Update, context: CallbackContext) -> int:
+    data = context.user_data
+    try:
+        r = calc_gold(
+            data["gold_price"], data["weight"],
+            data["manuf_fee"], data["seller_profit"], data["vat"]
+        )
+    except Exception as e:
+        logger.error(f"Calc error: {e}")
+        msg = update.message or update.callback_query.message
+        await msg.reply_text("⚠️ خطایی رخ داد. لطفاً دوباره تلاش کن.")
+        return ConversationHandler.END
+
+    msg = update.message or update.callback_query.message
+    await msg.reply_text(
+        build_result(r),
+        parse_mode="Markdown",
+        reply_markup=main_kb()
+    )
+
+    await msg.reply_text(
+        "👇 برای محاسبه جدید کلیک کن:",
+        reply_markup=result_kb()
+    )
+    return ConversationHandler.END
+
+# ─── New Calculation (from inline button) ────────────────────────────
+async def new_calc_cb(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    await query.edit_message_text("🔄 شروع محاسبه جدید...")
+    return await ask_price(update, context)
+
+# ─── Reset from message ──────────────────────────────────────────────
+async def reset_all(update: Update, context: CallbackContext) -> int:
+    context.user_data.clear()
+    await update.message.reply_text(
+        "🔄 محاسبه جدید\n\n"
+        "👇 از دکمه‌ها استفاده کن یا دستی وارد کن:",
+        reply_markup=price_kb(),
+        parse_mode="Markdown"
+    )
+    return GOLD_PRICE
+
+# ─── Help ────────────────────────────────────────────────────────────
+async def help_cmd(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(
         "🤖 *راهنمای استفاده*\n\n"
-        "۱. قیمت هر گرم طلای ۱۸ عیار رو به تومان وارد کن\n"
-        "۲. وزن طلا رو به گرم وارد کن (مثال: ۱۲.۳۴۵)\n"
-        "۳. درصد اجرت ساخت رو وارد کن\n"
-        "۴. درصد سود فروشنده رو وارد کن (پیش‌فرض: ۷)\n"
-        "۵. درصد مالیات بر ارزش افزوده رو وارد کن (پیش‌فرض: ۱۰)\n\n"
-        "در هر مرحله می‌تونی /cancel رو بزنی تا لغو کنی.",
+        "۱. قیمت هر گرم طلای ۱۸ عیار رو وارد کن\n"
+        "۲. وزن طلا رو به گرم وارد کن\n"
+        "۳. درصد اجرت ساخت رو انتخاب کن\n"
+        "۴. درصد سود فروشنده رو انتخاب کن (معمولاً ۷)\n"
+        "۵. درصد مالیات رو انتخاب کن (معمولاً ۱۰)\n\n"
+        "💡 می‌تونی از دکمه‌های预设 استفاده کنی یا عدد رو دستی تایپ کنی.\n"
+        "❌ برای لغو /cancel رو بزن.",
         parse_mode="Markdown"
     )
 
@@ -155,212 +483,64 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text(
         "❌ محاسبه لغو شد.\n\n"
         "برای شروع دوباره /start رو بزن.",
-        reply_markup=get_keyboard()
+        reply_markup=main_kb()
     )
     return ConversationHandler.END
 
-async def gold_price_handler(update: Update, context: CallbackContext) -> int:
+async def fallback(update: Update, context: CallbackContext) -> None:
     text = update.message.text
     if text == "📊 محاسبه جدید":
-        return await reset_and_start(update, context)
-    if text == "❓ راهنما":
-        await help_command(update, context)
-        return GOLD_PRICE
-
-    val = parse_decimal(text)
-    if val is None or val <= 0:
-        await update.message.reply_text(
-            "⚠️ لطفاً یه عدد معتبر وارد کن.\nمثال: `۳٬۳۵۰٬۰۰۰` یا `3350000`",
-            parse_mode="Markdown"
-        )
-        return GOLD_PRICE
-
-    context.user_data["gold_price"] = val
-    await update.message.reply_text(
-        f"✅ قیمت هر گرم: `{fmt(val)}` تومان ثبت شد.\n\n"
-        "حالا *وزن طلا* رو به گرم وارد کن:\n"
-        "مثال: `۱۲.۳۴۵` یا `12.345`",
-        parse_mode="Markdown"
-    )
-    return WEIGHT
-
-async def weight_handler(update: Update, context: CallbackContext) -> int:
-    text = update.message.text
-    if text == "📊 محاسبه جدید":
-        return await reset_and_start(update, context)
-    if text == "❓ راهنما":
-        await help_command(update, context)
-        return WEIGHT
-
-    val = parse_decimal(text)
-    if val is None or val <= 0:
-        await update.message.reply_text(
-            "⚠️ لطفاً وزن معتبر وارد کن.\nمثال: `۱۲.۳۴۵` یا `12.345`",
-            parse_mode="Markdown"
-        )
-        return WEIGHT
-
-    context.user_data["weight"] = val
-    await update.message.reply_text(
-        f"✅ وزن: `{fmt(val)}` گرم ثبت شد.\n\n"
-        "حالا *درصد اجرت ساخت* رو وارد کن:\n"
-        "مثال: `۱۵` (یعنی ۱۵٪)\n"
-        "اگه اجرت نداره، `۰` بفرست.",
-        parse_mode="Markdown"
-    )
-    return MANUF_FEE
-
-async def manuf_fee_handler(update: Update, context: CallbackContext) -> int:
-    text = update.message.text
-    if text == "📊 محاسبه جدید":
-        return await reset_and_start(update, context)
-    if text == "❓ راهنما":
-        await help_command(update, context)
-        return MANUF_FEE
-
-    val = parse_decimal(text)
-    if val is None:
-        await update.message.reply_text(
-            "⚠️ لطفاً یه درصد معتبر وارد کن.\nمثال: `۱۵` یا `0`",
-            parse_mode="Markdown"
-        )
-        return MANUF_FEE
-
-    context.user_data["manuf_fee"] = val
-    await update.message.reply_text(
-        f"✅ اجرت ساخت: `{fmt(val)}`٪ ثبت شد.\n\n"
-        "حالا *درصد سود فروشنده* رو وارد کن:\n"
-        "پیش‌فرض: `۷` درصد",
-        parse_mode="Markdown"
-    )
-    return SELLER_PROFIT
-
-async def seller_profit_handler(update: Update, context: CallbackContext) -> int:
-    text = update.message.text
-    if text == "📊 محاسبه جدید":
-        return await reset_and_start(update, context)
-    if text == "❓ راهنما":
-        await help_command(update, context)
-        return SELLER_PROFIT
-
-    val = parse_decimal(text)
-    if val is None:
-        await update.message.reply_text(
-            "⚠️ لطفاً یه درصد معتبر وارد کن.\n"
-            "پیش‌فرض: `۷` درصد",
-            parse_mode="Markdown"
-        )
-        return SELLER_PROFIT
-
-    context.user_data["seller_profit"] = val
-    await update.message.reply_text(
-        f"✅ سود فروشنده: `{fmt(val)}`٪ ثبت شد.\n\n"
-        "حالا *درصد مالیات بر ارزش افزوده* رو وارد کن:\n"
-        "پیش‌فرض: `۱۰` درصد",
-        parse_mode="Markdown"
-    )
-    return VAT
-
-async def vat_handler(update: Update, context: CallbackContext) -> int:
-    text = update.message.text
-    if text == "📊 محاسبه جدید":
-        return await reset_and_start(update, context)
-    if text == "❓ راهنما":
-        await help_command(update, context)
-        return VAT
-
-    val = parse_decimal(text)
-    if val is None:
-        await update.message.reply_text(
-            "⚠️ لطفاً یه درصد معتبر وارد کن.\n"
-            "پیش‌فرض: `۱۰` درصد",
-            parse_mode="Markdown"
-        )
-        return VAT
-
-    context.user_data["vat"] = val
-
-    # ─── Calculate & Show Result ──────────────────────
-    data = context.user_data
-    try:
-        result = calc_gold(
-            data["gold_price"], data["weight"],
-            data["manuf_fee"], data["seller_profit"], data["vat"]
-        )
-    except Exception as e:
-        logger.error(f"Calc error: {e}")
-        await update.message.reply_text("⚠️ خطایی در محاسبه رخ داد. دوباره تلاش کن.")
-        return ConversationHandler.END
-
-    text = build_result_text(result)
-    await update.message.reply_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=get_keyboard()
-    )
-
-    # ─── Ask if they want another calculation ─────────
-    await update.message.reply_text(
-        "برای محاسبه جدید دکمه *محاسبه جدید* رو بزن 👇",
-        parse_mode="Markdown",
-        reply_markup=get_keyboard()
-    )
-
-    return ConversationHandler.END
-
-async def reset_and_start(update: Update, context: CallbackContext) -> int:
-    context.user_data.clear()
-    await update.message.reply_text(
-        "🔄 محاسبه جدید\n\n"
-        "لطفاً *قیمت هر گرم طلای ۱۸ عیار* رو به تومان وارد کن:\n"
-        "مثال: `۳٬۳۵۰٬۰۰۰` یا `3350000`",
-        parse_mode="Markdown"
-    )
-    return GOLD_PRICE
-
-async def fallback_handler(update: Update, context: CallbackContext) -> None:
-    """Handle messages outside conversation."""
-    text = update.message.text
-    if text == "📊 محاسبه جدید":
-        await update.message.reply_text(
-            "برای شروع /start رو بزن 👇",
-            reply_markup=get_keyboard()
-        )
+        await update.message.reply_text("لطفاً /start رو بزن 👇", reply_markup=main_kb())
     elif text == "❓ راهنما":
-        await help_command(update, context)
+        await help_cmd(update, context)
     else:
         await update.message.reply_text(
-            "برای شروع /start رو بزن یا از دکمه‌ها استفاده کن 👇",
-            reply_markup=get_keyboard()
+            "برای شروع /start رو بزن 👇",
+            reply_markup=main_kb()
         )
 
 # ─── Main ────────────────────────────────────────────────────────────
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            MessageHandler(filters.Regex(r"^📊 محاسبه جدید$"), reset_and_start),
+            MessageHandler(filters.Regex(r"^📊 محاسبه جدید$"), reset_all),
+            CallbackQueryHandler(new_calc_cb, pattern="^new_calc$"),
         ],
         states={
-            GOLD_PRICE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, gold_price_handler)],
-            WEIGHT:        [MessageHandler(filters.TEXT & ~filters.COMMAND, weight_handler)],
-            MANUF_FEE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, manuf_fee_handler)],
-            SELLER_PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, seller_profit_handler)],
-            VAT:           [MessageHandler(filters.TEXT & ~filters.COMMAND, vat_handler)],
+            GOLD_PRICE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gold_price_handler),
+                CallbackQueryHandler(gold_price_cb, pattern=r"^gp:"),
+            ],
+            WEIGHT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, weight_handler),
+                CallbackQueryHandler(weight_cb, pattern=r"^w:"),
+            ],
+            MANUF_FEE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, manuf_handler),
+                CallbackQueryHandler(manuf_cb, pattern=r"^mf:"),
+            ],
+            SELLER_PROFIT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, profit_handler),
+                CallbackQueryHandler(profit_cb, pattern=r"^sp:"),
+            ],
+            VAT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, vat_handler),
+                CallbackQueryHandler(vat_cb, pattern=r"^vat:"),
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True,
     )
 
-    app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
+    app.add_handler(conv)
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback))
 
     logger.info("🤖 Bot started! Press Ctrl+C to stop.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
