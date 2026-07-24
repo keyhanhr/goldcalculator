@@ -12,6 +12,7 @@ import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from decimal import Decimal, InvalidOperation
+from httpx import Client, ConnectTimeout, ReadTimeout
 
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
@@ -97,17 +98,80 @@ def build_result(r: dict) -> str:
         f"📊 میانگین هر گرم:\n`{fmt(r['per_gram'])}` تومان"
     )
 
+# ─── Price Fetching ──────────────────────────────────────────────────
+CACHE: dict = {"tala": None, "tgju": None, "time": 0}
+import time as _time
+
+def fetch_gold_prices() -> tuple:
+    """Fetch 18K gold price from tala.ir and tgju.org.
+    Returns (tala_price, tgju_price) in Tomans, or (None, None) on failure."""
+    now = _time.time()
+    if now - CACHE["time"] < 120 and CACHE["tala"] is not None:
+        return CACHE["tala"], CACHE["tgju"]
+
+    tala_price = tgju_price = None
+
+    # Try tala.ir
+    try:
+        with Client(verify=False, timeout=8) as c:
+            r = c.get("https://www.tala.ir/", headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            # Find the 18K gold selling price
+            m = re.search(r'عیار\s*750\s*یا\s*18[^0-9]*([0-9,]+)', r.text)
+            if m:
+                tala_price = int(m.group(1).replace(",", ""))
+            if not tala_price:
+                # Try alternate pattern
+                m = re.search(r'طلای\s*18\s*عیار[^0-9]*([0-9,]+)', r.text, re.IGNORECASE)
+                if m:
+                    tala_price = int(m.group(1).replace(",", ""))
+    except Exception as e:
+        logger.warning(f"tala.ir fetch failed: {e}")
+
+    # Try tgju.org
+    try:
+        with Client(verify=False, timeout=8) as c:
+            r = c.get("https://www.tgju.org/", headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            # TGJU uses dynamic rendering, try to find the price in the HTML
+            m = re.search(r'طلای\s*18\s*عیار[^0-9]*([0-9,]+)', r.text, re.IGNORECASE)
+            if m:
+                val = int(m.group(1).replace(",", ""))
+                # TGJU prices are in Rials, convert to Tomans (divide by 10)
+                if val > 100_000_000:  # Looks like Rials
+                    tgju_price = val // 10
+                else:
+                    tgju_price = val
+    except Exception as e:
+        logger.warning(f"tgju.org fetch failed: {e}")
+
+    # Cache
+    CACHE["tala"] = tala_price
+    CACHE["tgju"] = tgju_price
+    CACHE["time"] = now
+
+    return tala_price, tgju_price
+
 # ─── Inline Keyboards ────────────────────────────────────────────────
 def btn(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text, callback_data=data)
 
 def price_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [btn("۱۵ میلیون", "gp:15000000"), btn("۱۶ میلیون", "gp:16000000")],
-        [btn("۱۷ میلیون", "gp:17000000"), btn("۱۸ میلیون", "gp:18000000")],
-        [btn("۱۹ میلیون", "gp:19000000"), btn("۲۰ میلیون", "gp:20000000")],
-        [btn("✏️ خودم می‌نویسم", "gp:custom")],
-    ])
+    tala, tgju = fetch_gold_prices()
+
+    buttons = []
+    if tala:
+        label = f"🔸 tala.ir: {fmt(Decimal(str(tala)))}"
+        buttons.append([btn(label, f"gp:{tala}")])
+    if tgju:
+        label = f"🔹 tgju: {fmt(Decimal(str(tgju)))}"
+        buttons.append([btn(label, f"gp:{tgju}")])
+
+    # Always show custom input option
+    buttons.append([btn("✏️ وارد کردن دستی قیمت", "gp:custom")])
+    return InlineKeyboardMarkup(buttons)
 
 def weight_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -170,7 +234,7 @@ async def ask_price(update: Update, context: CallbackContext) -> int:
     msg = update.message or update.callback_query.message
     await msg.reply_text(
         "💰 *قیمت هر گرم طلای ۱۸ عیار* رو وارد کن:\n\n"
-        "مثال: `۱۷٬۵۰۰٬۰۰۰` یا `17500000`",
+        "قیمت لحظه‌ای از سایت‌های زیر دریافت شد. یکی رو انتخاب کن یا دستی وارد کن:",
         reply_markup=price_kb(),
         parse_mode="Markdown"
     )
@@ -188,7 +252,8 @@ async def gold_price_handler(update: Update, context: CallbackContext) -> int:
     val = parse_decimal(text)
     if val is None or val <= 0:
         await update.message.reply_text(
-            "⚠️ لطفاً یه عدد معتبر وارد کن.\nمثال: `۱۷٬۵۰۰٬۰۰۰`",
+            "⚠️ لطفاً یه عدد معتبر وارد کن.\n"
+            "میتونی از دکمه‌های بالا استفاده کنی یا دستی بنویسی.",
             reply_markup=price_kb(),
             parse_mode="Markdown"
         )
@@ -205,7 +270,8 @@ async def gold_price_cb(update: Update, context: CallbackContext) -> int:
     if data == "gp:custom":
         await query.edit_message_text(
             "💰 لطفاً *قیمت هر گرم* رو به صورت دستی تایپ کن:\n\n"
-            "مثال: `۳٬۳۵۰٬۰۰۰` یا `3350000`",
+            "فقط عدد رو بفرست، مثل:\n"
+            "`۱۸۸۵۰۰۰۰` یا `18900000`",
             reply_markup=None,
             parse_mode="Markdown"
         )
