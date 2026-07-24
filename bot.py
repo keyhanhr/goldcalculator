@@ -96,6 +96,7 @@ WATCHLIST_LABELS = {
     "tala:sekke": ("🪙 سکه امامی", "تومان"),
     "tala:sekke-nim": ("🪙 نیم سکه", "تومان"),
     "tala:sekke-rob": ("🪙 ربع سکه", "تومان"),
+    "tala:ounce": ("🌍 اونس طلا", "$"),
 }
 
 def cg_id(item: str) -> str:
@@ -113,19 +114,57 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
 
     result = {}
     crypto_ids = []
-    tala_paths = []
 
     for item in items:
         if item.startswith("crypto:"):
             crypto_ids.append(cg_id(item))
-        elif item.startswith("tala:"):
-            tala_paths.append(item)
+
+    # Fetch all prices from tala.ir API
+    try:
+        with Client(verify=False, timeout=8) as c:
+            r = c.get("https://www.tala.ir/ajax/price", headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://www.tala.ir/",
+                "X-Requested-With": "XMLHttpRequest"
+            })
+            data = r.json()
+
+            # Map tala API keys to our watchlist items
+            tala_map = {
+                "tala:18k": ("gold", "gold_18k"),
+                "tala:sekke": ("sekke", "sekke-jad"),
+                "tala:sekke-nim": ("sekke", "sekke-nim"),
+                "tala:sekke-rob": ("sekke", "sekke-rob"),
+                "tala:ounce": ("gold", "gold_ounce"),
+            }
+
+            for item in items:
+                if item in tala_map:
+                    cat, key = tala_map[item]
+                    try:
+                        price = data[cat][key]["v"]
+                        # Parse price - remove commas
+                        price_clean = price.replace(",", "")
+                        try:
+                            price_f = float(price_clean)
+                            if price_f >= 1000:
+                                result[item] = f"{int(price_f):,} تومان"
+                            else:
+                                result[item] = f"{price_f:,.2f} $"
+                        except ValueError:
+                            result[item] = price
+                    except (KeyError, TypeError):
+                        result[item] = "—"
+    except Exception as e:
+        logger.warning(f"tala.ir API error: {e}")
+        for item in items:
+            if item.startswith("tala:"):
+                result[item] = "⚠️ خطا"
 
     # Fetch crypto prices from CoinPaprika
     for item in items:
         if item.startswith("crypto:"):
             cid = cg_id(item)
-            # Map CoinGecko IDs to CoinPaprika IDs
             cp_map = {
                 "bitcoin": "btc-bitcoin",
                 "tether": "usdt-tether",
@@ -159,46 +198,6 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
             except Exception as e:
                 logger.warning(f"CoinPaprika {cp_id} error: {e}")
                 result[item] = "⚠️ خطا"
-
-    # Fetch Iranian prices from tala.ir (only 18k works server-side)
-    # Calculate coin prices from 18K gold price
-    gold_18k = None
-    for item in tala_paths:
-        if item == "tala:18k":
-            try:
-                with Client(verify=False, timeout=8) as c:
-                    r = c.get("https://www.tala.ir/price/18k", headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    })
-                    m = re.search(r'عیار\s*750\s*یا\s*18.*?<h5[^>]*>([0-9,]+)', r.text, re.DOTALL)
-                    if m:
-                        gold_18k = int(m.group(1).replace(",", ""))
-                        result[item] = f"{gold_18k:,} تومان"
-                    else:
-                        result[item] = "—"
-            except Exception as e:
-                logger.warning(f"tala.ir/18k error: {e}")
-                result[item] = "⚠️ خطا"
-        elif item.startswith("tala:") and gold_18k:
-            # Calculate Iranian coin prices from 18K gold
-            # Gold 900 (21.6K) per gram = 18K * 900/750
-            gold_900 = gold_18k * 900 // 750
-            premium = 3  # 3% premium for coin
-            if item == "tala:sekke":
-                # Emami coin: 8.133g of gold 900
-                coin_price = int(8.133 * gold_900 * (100 + premium) / 100)
-            elif item == "tala:sekke-nim":
-                # Half coin: 4.0665g of gold 900
-                coin_price = int(4.0665 * gold_900 * (100 + premium) / 100)
-            elif item == "tala:sekke-rob":
-                # Quarter coin: 2.03325g of gold 900
-                coin_price = int(2.03325 * gold_900 * (100 + premium) / 100)
-            else:
-                coin_price = None
-            if coin_price:
-                result[item] = f"{coin_price:,} تومان"
-            else:
-                result[item] = "—"
 
     PRICE_CACHE["data"] = result
     PRICE_CACHE["time"] = now
@@ -237,21 +236,24 @@ GOLD_CACHE: dict = {"tala": None, "time": 0}
 import time as _gtime
 
 def fetch_gold_price() -> int | None:
+    """Fetch 18K gold price from tala.ir API."""
     now = _gtime.time()
     if now - GOLD_CACHE["time"] < 120 and GOLD_CACHE["tala"] is not None:
         return GOLD_CACHE["tala"]
     try:
         with Client(verify=False, timeout=8) as c:
-            r = c.get("https://www.tala.ir/price/18k", headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            r = c.get("https://www.tala.ir/ajax/price", headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://www.tala.ir/",
+                "X-Requested-With": "XMLHttpRequest"
             })
-            m = re.search(r'عیار\s*750\s*یا\s*18.*?<h5[^>]*>([0-9,]+)', r.text, re.DOTALL)
-            if m:
-                GOLD_CACHE["tala"] = int(m.group(1).replace(",", ""))
-                GOLD_CACHE["time"] = now
-                return GOLD_CACHE["tala"]
+            data = r.json()
+            price_str = data["gold"]["gold_18k"]["v"].replace(",", "")
+            GOLD_CACHE["tala"] = int(float(price_str))
+            GOLD_CACHE["time"] = now
+            return GOLD_CACHE["tala"]
     except Exception as e:
-        logger.warning(f"tala.ir fetch failed: {e}")
+        logger.warning(f"tala.ir API fetch failed: {e}")
     return None
 
 # ─── Keyboards ───────────────────────────────────────────────────────
@@ -301,7 +303,7 @@ def main_kb() -> ReplyKeyboardMarkup:
 # ─── Watchlist ───────────────────────────────────────────────────────
 DEFAULT_COINS = [
     "crypto:bitcoin", "tala:18k", "crypto:tether",
-    "crypto:pax-gold", "tala:sekke", "tala:sekke-nim", "tala:sekke-rob",
+    "tala:ounce", "tala:sekke", "tala:sekke-nim", "tala:sekke-rob",
 ]
 
 async def watchlist_cmd(update: Update, context: CallbackContext) -> None:
