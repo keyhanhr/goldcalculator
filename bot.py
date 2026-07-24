@@ -153,7 +153,7 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                                 p_int = int(round(price_f))
                                 result[item] = f"{fmt(Decimal(str(p_int)))} دلار"
                             elif price_f >= 1000:
-                                result[item] = f"{fmt(Decimal(str(int(price_f))))} تومان"
+                                result[item] = f"{fmt(Decimal(str(int(price_f))))} ت"
                             else:
                                 result[item] = f"{price_f:,.2f} $"
                         except ValueError:
@@ -177,7 +177,7 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                 if m:
                     price_rial = int(m.group(1).replace(",", ""))
                     price_toman = price_rial // 10
-                    result["tala:dollar"] = f"{fmt(Decimal(str(price_toman)))} تومان"
+                    result["tala:dollar"] = f"{fmt(Decimal(str(price_toman)))} ت"
                 else:
                     result["tala:dollar"] = "—"
         except Exception as e:
@@ -692,7 +692,10 @@ async def cancel(update: Update, context: CallbackContext) -> int:
 
 async def fallback(update: Update, context: CallbackContext) -> None:
     text = update.message.text
-    if text == "📊 محاسبه طلا":
+    # Check if user is in "add coin" mode
+    if context.user_data.get("awaiting_coin"):
+        await add_coin_handler(update, context)
+    elif text == "📊 محاسبه طلا":
         await calc_start(update, context)
     elif text == "📋 واچ‌لیست":
         await watchlist_cmd(update, context)
