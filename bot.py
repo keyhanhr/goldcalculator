@@ -118,8 +118,9 @@ def fetch_gold_prices() -> tuple:
             })
             # Find the 18K gold selling price (after "عیار 750 یا 18")
             m = re.search(
-                r'عیار\s*750\s*یا\s*18[^<]*</h4>[^<]*<h5[^>]*>([0-9,]+)',
-                r.text
+                r'عیار\s*750\s*یا\s*18.*?<h5[^>]*>([0-9,]+)',
+                r.text,
+                re.DOTALL
             )
             if m:
                 tala_price = int(m.group(1).replace(",", ""))
