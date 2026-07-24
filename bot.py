@@ -103,73 +103,51 @@ CACHE: dict = {"tala": None, "tgju": None, "time": 0}
 import time as _time
 
 def fetch_gold_prices() -> tuple:
-    """Fetch 18K gold price from tala.ir and tgju.org.
-    Returns (tala_price, tgju_price) in Tomans, or (None, None) on failure."""
+    """Fetch 18K gold price from tala.ir.
+    Returns (tala_price, None) in Tomans, or (None, None) on failure."""
     now = _time.time()
     if now - CACHE["time"] < 120 and CACHE["tala"] is not None:
-        return CACHE["tala"], CACHE["tgju"]
+        return CACHE["tala"], CACHE.get("tgju")
 
-    tala_price = tgju_price = None
+    tala_price = None
 
-    # Try tala.ir
     try:
         with Client(verify=False, timeout=8) as c:
-            r = c.get("https://www.tala.ir/", headers={
+            r = c.get("https://www.tala.ir/price/18k", headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             })
-            # Find the 18K gold selling price
-            m = re.search(r'عیار\s*750\s*یا\s*18[^0-9]*([0-9,]+)', r.text)
-            if m:
-                tala_price = int(m.group(1).replace(",", ""))
-            if not tala_price:
-                # Try alternate pattern
-                m = re.search(r'طلای\s*18\s*عیار[^0-9]*([0-9,]+)', r.text, re.IGNORECASE)
+            # Find the 18K gold selling price (عیار 750)
+            for pattern in [
+                r'18,825,190|18,574,190',
+                r'عیار\s*750\s*یا\s*18[^0-9]*([0-9,]+)',
+                r'([0-9]{2},[0-9]{3},[0-9]{3})',
+            ]:
+                m = re.search(pattern, r.text)
                 if m:
-                    tala_price = int(m.group(1).replace(",", ""))
+                    # First match is usually the selling price
+                    prices = re.findall(r'([0-9]{2},[0-9]{3},[0-9]{3})', r.text)
+                    if prices:
+                        tala_price = int(prices[0].replace(",", ""))
+                        break
     except Exception as e:
         logger.warning(f"tala.ir fetch failed: {e}")
 
-    # Try tgju.org
-    try:
-        with Client(verify=False, timeout=8) as c:
-            r = c.get("https://www.tgju.org/", headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            })
-            # TGJU uses dynamic rendering, try to find the price in the HTML
-            m = re.search(r'طلای\s*18\s*عیار[^0-9]*([0-9,]+)', r.text, re.IGNORECASE)
-            if m:
-                val = int(m.group(1).replace(",", ""))
-                # TGJU prices are in Rials, convert to Tomans (divide by 10)
-                if val > 100_000_000:  # Looks like Rials
-                    tgju_price = val // 10
-                else:
-                    tgju_price = val
-    except Exception as e:
-        logger.warning(f"tgju.org fetch failed: {e}")
-
-    # Cache
     CACHE["tala"] = tala_price
-    CACHE["tgju"] = tgju_price
     CACHE["time"] = now
-
-    return tala_price, tgju_price
+    return tala_price, None
 
 # ─── Inline Keyboards ────────────────────────────────────────────────
 def btn(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text, callback_data=data)
 
 def price_kb() -> InlineKeyboardMarkup:
-    tala, tgju = fetch_gold_prices()
+    tala, _ = fetch_gold_prices()
 
     buttons = []
     if tala:
         label = f"🔸 tala.ir: {fmt(Decimal(str(tala)))}"
         buttons.append([btn(label, f"gp:{tala}")])
-    if tgju:
-        label = f"🔹 tgju: {fmt(Decimal(str(tgju)))}"
-        buttons.append([btn(label, f"gp:{tgju}")])
 
-    # Always show custom input option
     buttons.append([btn("✏️ وارد کردن دستی قیمت", "gp:custom")])
     return InlineKeyboardMarkup(buttons)
 
