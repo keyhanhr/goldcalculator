@@ -27,7 +27,7 @@ from telegram.ext import (
 
 # ─── Config ──────────────────────────────────────────────────────────
 TOKEN = os.environ.get("BOT_TOKEN", "8738042848:***")
-DATA_FILE = os.environ.get("DATA_FILE", "bot_data.pkl")
+DATA_FILE = "bot_data.pkl"
 
 # ─── Logging ─────────────────────────────────────────────────────────
 logging.basicConfig(
