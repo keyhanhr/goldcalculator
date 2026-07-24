@@ -152,7 +152,7 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                                 # Gold ounce is in USD
                                 result[item] = f"{price_f:,.2f} $"
                             elif price_f >= 1000:
-                                result[item] = f"{int(price_f):,} تومان"
+                                result[item] = f"{fmt(Decimal(str(int(price_f))))} تومان"
                             else:
                                 result[item] = f"{price_f:,.2f} $"
                         except ValueError:
@@ -175,7 +175,7 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                 m = re.search(r'class=.price.[^>]*>([0-9,]+)', r.text)
                 if m:
                     price = int(m.group(1).replace(",", ""))
-                    result["tala:dollar"] = f"{price:,} تومان"
+                    result["tala:dollar"] = f"{fmt(Decimal(str(price)))} تومان"
                 else:
                     result["tala:dollar"] = "—"
         except Exception as e:
