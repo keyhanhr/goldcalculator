@@ -103,9 +103,9 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
 
 def price_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("۳٬۰۰۰٬۰۰۰", "gp:3000000"), btn("۳٬۳۵۰٬۰۰۰", "gp:3350000")],
-        [btn("۳٬۵۰۰٬۰۰۰", "gp:3500000"), btn("۳٬۷۵۰٬۰۰۰", "gp:3750000")],
-        [btn("۴٬۰۰۰٬۰۰۰", "gp:4000000"), btn("۴٬۵۰۰٬۰۰۰", "gp:4500000")],
+        [btn("۱۵ میلیون", "gp:15000000"), btn("۱۶ میلیون", "gp:16000000")],
+        [btn("۱۷ میلیون", "gp:17000000"), btn("۱۸ میلیون", "gp:18000000")],
+        [btn("۱۹ میلیون", "gp:19000000"), btn("۲۰ میلیون", "gp:20000000")],
         [btn("✏️ خودم می‌نویسم", "gp:custom")],
     ])
 
@@ -155,10 +155,12 @@ def store_and_advance(context: CallbackContext, key: str, val: Decimal) -> str:
 async def start(update: Update, context: CallbackContext) -> int:
     user = update.effective_user
     await update.message.reply_text(
-        f"سلام {user.first_name} 👋\n\n"
-        "🪙 به *محاسبه‌گر قیمت طلا* خوش اومدی!\n\n"
-        "قیمت نهایی خرید طلا رو با احتساب **اجرت ساخت**، **سود فروشنده** و **مالیات** محاسبه کن.\n\n"
-        "👇 از دکمه‌های زیر استفاده کن یا مقدار رو دستی وارد کن:",
+        f"سلام {user.first_name} جان 🖐️\n\n"
+        "از حساب‌کتاب طلایی که می‌خری سَر درنمیاری؟ 🤯\n"
+        "نگران نباش، من اینجام تا کارو برات راحت کنم! 🪙\n\n"
+        "با چند تا دکمه ساده، **قیمت نهایی طلا** رو با احتساب اجرت ساخت، سود فروشنده و مالیات برات حساب می‌کنم.\n\n"
+        "همونقد که کیبوردتو می‌بندی، جیبت باز می‌شه 😄\n\n"
+        "👇 از دکمه‌های زیر استفاده کن یا عدد رو دستی وارد کن:",
         reply_markup=main_kb(),
         parse_mode="Markdown"
     )
@@ -168,7 +170,7 @@ async def ask_price(update: Update, context: CallbackContext) -> int:
     msg = update.message or update.callback_query.message
     await msg.reply_text(
         "💰 *قیمت هر گرم طلای ۱۸ عیار* رو وارد کن:\n\n"
-        "مثال: `۳٬۳۵۰٬۰۰۰` یا `3350000`",
+        "مثال: `۱۷٬۵۰۰٬۰۰۰` یا `17500000`",
         reply_markup=price_kb(),
         parse_mode="Markdown"
     )
@@ -186,7 +188,7 @@ async def gold_price_handler(update: Update, context: CallbackContext) -> int:
     val = parse_decimal(text)
     if val is None or val <= 0:
         await update.message.reply_text(
-            "⚠️ لطفاً یه عدد معتبر وارد کن.\nمثال: `۳٬۳۵۰٬۰۰۰`",
+            "⚠️ لطفاً یه عدد معتبر وارد کن.\nمثال: `۱۷٬۵۰۰٬۰۰۰`",
             reply_markup=price_kb(),
             parse_mode="Markdown"
         )
