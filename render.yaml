@@ -8,4 +8,10 @@ services:
     envVars:
       - key: BOT_TOKEN
         sync: false
+      - key: DATA_FILE
+        value: /var/data/bot_data.pkl
+    disk:
+      name: bot-data
+      mountPath: /var/data
+      sizeGB: 1
     plan: free
