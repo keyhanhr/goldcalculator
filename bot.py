@@ -149,8 +149,9 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                         try:
                             price_f = float(price_clean)
                             if item == "tala:ounce":
-                                # Gold ounce is in USD
-                                result[item] = f"{price_f:,.2f} $"
+                                # Gold ounce in USD, no decimals
+                                p_int = int(round(price_f))
+                                result[item] = f"{fmt(Decimal(str(p_int)))} دلار"
                             elif price_f >= 1000:
                                 result[item] = f"{fmt(Decimal(str(int(price_f))))} تومان"
                             else:
@@ -209,12 +210,15 @@ def fetch_watchlist_prices(items: list[str]) -> dict:
                     price = data.get("quotes", {}).get("USD", {}).get("price")
                     if price:
                         price_f = float(price)
+                        # Format with Persian digits and no decimals if integer
                         if price_f >= 1:
-                            result[item] = f"{price_f:,.2f} $"
+                            p_int = int(round(price_f))
+                            formatted = fmt(Decimal(str(p_int)))
                         elif price_f >= 0.01:
-                            result[item] = f"{price_f:.4f} $"
+                            formatted = f"{price_f:.4f} $"
                         else:
-                            result[item] = f"{price_f:.6f} $"
+                            formatted = f"{price_f:.6f} $"
+                        result[item] = f"{formatted} دلار"
                     else:
                         result[item] = "—"
             except Exception as e:
@@ -325,7 +329,7 @@ def main_kb() -> ReplyKeyboardMarkup:
 # ─── Watchlist ───────────────────────────────────────────────────────
 DEFAULT_COINS = [
     "crypto:bitcoin", "tala:18k", "tala:dollar",
-    "tala:ounce", "tala:sekke", "tala:sekke-nim", "tala:sekke-rob",
+    "tala:sekke", "tala:sekke-nim", "tala:sekke-rob",
 ]
 
 async def watchlist_cmd(update: Update, context: CallbackContext) -> None:
