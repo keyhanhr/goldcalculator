@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import re
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from decimal import Decimal, InvalidOperation
 
 from telegram import (
@@ -499,8 +501,27 @@ async def fallback(update: Update, context: CallbackContext) -> None:
             reply_markup=main_kb()
         )
 
+# ─── Health HTTP Server (for Render keep-alive) ──────────────────────
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, fmt: str, *args: tuple) -> None:
+        pass  # suppress health-check logs
+
+def run_http() -> None:
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"🌐 Health server on port {port}")
+    server.serve_forever()
+
 # ─── Main ────────────────────────────────────────────────────────────
-def main():
+def main() -> None:
+    # Start health HTTP server in background thread
+    threading.Thread(target=run_http, daemon=True).start()
+
     app = Application.builder().token(TOKEN).build()
 
     conv = ConversationHandler(
