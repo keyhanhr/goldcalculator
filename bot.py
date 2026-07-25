@@ -22,7 +22,7 @@ from telegram import (
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, filters, CallbackContext,
-    PicklePersistence, PersistenceInput
+    PicklePersistence, PersistenceInput, ContextTypes
 )
 
 # ─── Config ──────────────────────────────────────────────────────────
@@ -54,22 +54,15 @@ def parse_decimal(text: str) -> Decimal | None:
     except (InvalidOperation, ValueError):
         return None
 
-def fmt(n: Decimal) -> str:
-    s = str(n.quantize(Decimal("1")) if n == n.to_integral() else n.normalize())
-    int_part, _, dec_part = s.partition(".")
-    result = []
-    for i, ch in enumerate(reversed(int_part)):
-        if i and i % 3 == 0:
-            result.append("٬")
-        result.append(ch)
-    int_part = "".join(reversed(result))
-    for e, p in PERSIAN_MAP.items():
-        int_part = int_part.replace(e, p)
-    if dec_part:
-        for e, p in PERSIAN_MAP.items():
-            dec_part = dec_part.replace(e, p)
-        return f"{int_part}/{dec_part}"
-    return int_part
+def fmt(num: Decimal | int) -> str:
+    """Format number with Persian digits, no scientific notation."""
+    s = format(num, "f").rstrip("0").rstrip(".")
+    return s.translate(PERSIAN_MAP)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
 # ─── Watchlist Default Items ─────────────────────────────────────────
 WATCHLIST_DEFAULTS = [
@@ -850,6 +843,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback))
 
     logger.info("🤖 Bot started!")
+    app.add_error_handler(error_handler)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
