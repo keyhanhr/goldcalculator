@@ -749,7 +749,8 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def fallback(update: Update, context: CallbackContext) -> None:
-    text = update.message.text
+    text = update.message.text if update.message else None
+    logger.info(f"Fallback received: {text!r}")
     # Check if user is in "add coin" mode
     if context.user_data.get("awaiting_coin"):
         await add_coin_handler(update, context)
@@ -787,6 +788,14 @@ def run_http() -> None:
 
 def main() -> None:
     threading.Thread(target=run_http, daemon=True).start()
+
+    # Remove stale pickle file if exists
+    if os.path.exists(DATA_FILE):
+        try:
+            os.remove(DATA_FILE)
+            logger.info(f"🧹 Removed stale {DATA_FILE}")
+        except OSError:
+            pass
 
     persistence = PicklePersistence(
         filepath=DATA_FILE,
@@ -844,4 +853,8 @@ def main() -> None:
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.exception(f"💥 Fatal error: {e}")
+        raise
